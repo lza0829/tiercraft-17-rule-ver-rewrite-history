@@ -196,8 +196,8 @@ def run_paste_to_detail(domain_id: int) -> dict:
         conn.execute("BEGIN IMMEDIATE")
         # 只重建当前启用版本自己的产物；历史版本明细与拒收记录保持不动
         conn.execute(
-            "DELETE FROM layer_detail WHERE domain_id=? AND id<0",
-            (domain_id,),
+            "DELETE FROM layer_detail WHERE domain_id=? AND rule_pack_version=?",
+            (domain_id, version),
         )
         conn.execute(
             "DELETE FROM detail_rejections WHERE domain_id=? AND rule_version=?",
@@ -234,7 +234,10 @@ def run_paste_to_detail(domain_id: int) -> dict:
         job_id = int(job_cur.lastrowid)
 
         out = drop = 0
+        written_keys: list[str] = []
+        rejected_keys: list[str] = []
         for row in paste:
+            biz_key = f"{row['biz_day']}|{row['store_code']}"
             hit, reason = rules.evaluate_row(pack, row)
             if hit is not None:
                 conn.execute(
@@ -256,6 +259,8 @@ def run_paste_to_detail(domain_id: int) -> dict:
                     ),
                 )
                 drop += 1
+                if len(rejected_keys) < 5:
+                    rejected_keys.append(biz_key)
                 continue
             conn.execute(
                 """
@@ -279,6 +284,8 @@ def run_paste_to_detail(domain_id: int) -> dict:
                 ),
             )
             out += 1
+            if len(written_keys) < 5:
+                written_keys.append(biz_key)
 
         conn.execute(
             """
@@ -292,6 +299,27 @@ def run_paste_to_detail(domain_id: int) -> dict:
                 out,
                 drop,
                 job_id,
+            ),
+        )
+        # 裁决证明与明细、拒收同一事务落库，之后只读不改
+        conn.execute(
+            """
+            INSERT INTO rule_verdicts(
+              job_id, domain_id, rule_pack_version,
+              in_count, out_count, reject_count, sample_keys_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                job_id,
+                domain_id,
+                version,
+                len(paste),
+                out,
+                drop,
+                json.dumps(
+                    {"写入样本键": written_keys, "拒收样本键": rejected_keys},
+                    ensure_ascii=False,
+                ),
             ),
         )
         for old in previous_jobs:
@@ -533,6 +561,33 @@ def list_reconcile(domain_id: int | None = None) -> list[dict]:
         conn.close()
 
 
+def _verdict_dict(row: sqlite3.Row) -> dict:
+    samples = json.loads(row["sample_keys_json"] or "{}")
+    return {
+        "任务编号": int(row["job_id"]),
+        "主题域编号": int(row["domain_id"]),
+        "启用版本": row["rule_pack_version"],
+        "输入行数": int(row["in_count"]),
+        "写入行数": int(row["out_count"]),
+        "拒收行数": int(row["reject_count"]),
+        "写入样本键": samples.get("写入样本键") or [],
+        "拒收样本键": samples.get("拒收样本键") or [],
+        "登记时间": row["created_at"],
+    }
+
+
+def get_verdict(job_id: int) -> dict | None:
+    """按任务 id 读取规则裁决证明（只读）；非裁决任务或早期任务返回 None。"""
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM rule_verdicts WHERE job_id=?", (job_id,)
+        ).fetchone()
+        return _verdict_dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def job_report(job_id: int) -> dict | None:
     """任务报告：输入/写入/拒收必须与明细、拒收清单、启用版本逐项对得上。"""
     conn = connect()
@@ -551,11 +606,16 @@ def job_report(job_id: int) -> dict | None:
 
         version = job.get("rule_pack_version")
         active = rules.get_active_pack()
+        verdict_row = conn.execute(
+            "SELECT * FROM rule_verdicts WHERE job_id=?", (job_id,)
+        ).fetchone()
         report: dict = {
             "任务": job,
             "规则版本": version,
             "当前启用版本": active["version"] if active else None,
             "版本仍启用": bool(active and version == active["version"]),
+            # 与 /api/jobs/{id}/verdict 同源，均出自 rule_verdicts
+            "裁决证明": _verdict_dict(verdict_row) if verdict_row else None,
         }
 
         paste_total = int(

@@ -114,6 +114,21 @@ CREATE TABLE IF NOT EXISTS layer_jobs (
   FOREIGN KEY(domain_id) REFERENCES domains(id)
 );
 
+-- 规则裁决证明：贴源到明细任务落库时同事务写入，之后只读不改
+CREATE TABLE IF NOT EXISTS rule_verdicts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL UNIQUE,
+  domain_id INTEGER NOT NULL,
+  rule_pack_version TEXT NOT NULL,
+  in_count INTEGER NOT NULL,
+  out_count INTEGER NOT NULL,
+  reject_count INTEGER NOT NULL,
+  sample_keys_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY(job_id) REFERENCES layer_jobs(id),
+  FOREIGN KEY(domain_id) REFERENCES domains(id)
+);
+
 CREATE TABLE IF NOT EXISTS reconcile_reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   domain_id INTEGER NOT NULL,

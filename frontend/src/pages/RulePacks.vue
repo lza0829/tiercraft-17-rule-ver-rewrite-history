@@ -6,6 +6,7 @@ const packs = ref([])
 const err = ref('')
 const msg = ref('')
 const busy = ref(false)
+const verdict = ref(null)
 
 const form = ref({
   version: '',
@@ -34,6 +35,19 @@ const fieldHint = {
 
 async function refresh() {
   packs.value = await getJson('/api/rule-packs')
+  await refreshVerdict()
+}
+
+// 与分层任务界面同源：都读 /api/jobs/{id}/verdict（rule_verdicts 表）
+async function refreshVerdict() {
+  verdict.value = null
+  if (!active.value) return
+  const jobs = await getJson('/api/jobs')
+  const job = jobs.find(
+    (j) => j.step === 'paste_to_detail' && j.rule_pack_version === active.value.version,
+  )
+  if (!job) return
+  verdict.value = await getJson(`/api/jobs/${job.id}/verdict`)
 }
 
 onMounted(async () => {
@@ -138,6 +152,24 @@ async function activate(pack) {
         <span class="muted">（{{ active.rule_count }} 条规则，启用时间 {{ active.activated_at || '—' }}）</span>
       </p>
       <p v-else class="warn">尚未启用任何版本，分层任务将无法运行。</p>
+      <template v-if="verdict">
+        <h4 class="proof-title">最近一次裁决证明（任务 #{{ verdict.任务编号 }}）</h4>
+        <table class="proof-table">
+          <tbody>
+            <tr><th>本次任务版本</th><td><strong>{{ verdict.启用版本 }}</strong></td></tr>
+            <tr>
+              <th>输入 / 写入 / 拒收</th>
+              <td>{{ verdict.输入行数 }} / {{ verdict.写入行数 }} / {{ verdict.拒收行数 }}</td>
+            </tr>
+            <tr><th>写入样本键</th><td>{{ verdict.写入样本键.join('、') || '—' }}</td></tr>
+            <tr><th>拒收样本键</th><td>{{ verdict.拒收样本键.join('、') || '—' }}</td></tr>
+            <tr><th>证明登记时间</th><td>{{ verdict.登记时间 }}</td></tr>
+          </tbody>
+        </table>
+      </template>
+      <p v-else-if="active" class="muted">
+        当前启用版本还没有贴源到明细任务的裁决证明，请到「分层任务」执行一次。
+      </p>
     </div>
 
     <div class="panel">
@@ -247,4 +279,6 @@ input {
 input.narrow { max-width: 150px; }
 .hint { margin: 0 0 12px; font-size: 13px; }
 .active-pack { margin: 0; font-size: 15px; }
+.proof-title { margin: 14px 0 8px; font-size: 14px; color: var(--accent); }
+.proof-table th { width: 160px; }
 </style>

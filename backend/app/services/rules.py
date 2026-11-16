@@ -322,13 +322,6 @@ def activate_rule_pack(pack_id: int) -> dict:
             """,
             (pack_id,),
         )
-        version = conn.execute(
-            "SELECT version FROM rule_packs WHERE id=?", (pack_id,)
-        ).fetchone()["version"]
-        conn.execute(
-            "UPDATE layer_detail SET rule_pack_version=?",
-            (version,),
-        )
         conn.commit()
         return _fetch_pack(conn, pack_id) or {}
     except Exception:
@@ -370,7 +363,7 @@ def evaluate_row(rule_pack: dict, row: dict | sqlite3.Row) -> tuple[dict | None,
         if rule_type == "required":
             for field in _required_fields(rule):
                 if _is_blank(data.get(field)):
-                    continue
+                    return rule, f"「{_field_label(field)}」为必填，当前为空"
         elif rule_type == "amount_min":
             config = rule.get("config") or {}
             field = rule.get("field") or "amount"

@@ -133,6 +133,17 @@ async function showReport(jobId) {
               {{ report.一致 === true ? '一致' : report.一致 === false ? '存在差异' : '已替代，不参与核对' }}
             </td>
           </tr>
+          <template v-if="report.裁决证明">
+            <tr><th colspan="2" class="proof-head">规则裁决证明（与明细、拒收同源落库）</th></tr>
+            <tr><th>证明·启用版本</th><td><strong>{{ report.裁决证明.启用版本 }}</strong></td></tr>
+            <tr>
+              <th>证明·输入 / 写入 / 拒收</th>
+              <td>{{ report.裁决证明.输入行数 }} / {{ report.裁决证明.写入行数 }} / {{ report.裁决证明.拒收行数 }}</td>
+            </tr>
+            <tr><th>证明·写入样本键</th><td>{{ report.裁决证明.写入样本键.join('、') || '—' }}</td></tr>
+            <tr><th>证明·拒收样本键</th><td>{{ report.裁决证明.拒收样本键.join('、') || '—' }}</td></tr>
+            <tr><th>证明·登记时间</th><td>{{ report.裁决证明.登记时间 }}</td></tr>
+          </template>
           <tr v-if="report.说明"><th>说明</th><td>{{ report.说明 }}</td></tr>
         </tbody>
       </table>
@@ -177,5 +188,6 @@ async function showReport(jobId) {
 }
 .hint { margin: 0; font-size: 13px; }
 .report { background: rgba(232, 238, 245, 0.5); padding: 16px; border: 1px solid var(--line); }
+.proof-head { color: var(--accent); border-top: 2px solid var(--line); padding-top: 10px; }
 .btn { display: inline-block; padding: 8px 16px; background: transparent; color: var(--accent); border: 1px solid var(--accent); }
 </style>

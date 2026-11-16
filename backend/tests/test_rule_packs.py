@@ -206,3 +206,57 @@ def test_reconcile_requires_active_pack(fresh_db):
         conn.close()
     with pytest.raises(ValueError):
         pipeline.run_paste_to_detail(1)
+
+
+def test_verdict_proof_recorded_and_read_back(fresh_db):
+    pipeline, rules = fresh_db
+    pack = _strict_pack(rules)
+    rules.activate_rule_pack(pack["id"])
+    job = pipeline.run_paste_to_detail(1)
+
+    verdict = pipeline.get_verdict(job["id"])
+    assert verdict is not None
+    assert verdict["任务编号"] == job["id"]
+    assert verdict["启用版本"] == "v2-严格"
+    assert (verdict["输入行数"], verdict["写入行数"], verdict["拒收行数"]) == (6, 3, 3)
+
+    # 证明与明细、拒收清单同源：计数与样本键都能对应到真实行
+    detail = pipeline.layer_rows("detail", 1, "v2-严格")
+    rejects = rules.list_rejections(1, rule_version="v2-严格")
+    assert verdict["写入行数"] == len(detail)
+    assert verdict["拒收行数"] == len(rejects)
+    detail_keys = {f"{r['biz_day']}|{r['store_code']}" for r in detail}
+    reject_keys = {f"{r['biz_day']}|{r['store_code']}" for r in rejects}
+    assert verdict["写入样本键"] and set(verdict["写入样本键"]) <= detail_keys
+    assert verdict["拒收样本键"] and set(verdict["拒收样本键"]) <= reject_keys
+
+
+def test_verdict_keeps_own_version_after_activation_switch(fresh_db):
+    pipeline, rules = fresh_db
+    job_v1 = pipeline.run_paste_to_detail(1)
+    pack = _strict_pack(rules)
+    rules.activate_rule_pack(pack["id"])
+    job_v2 = pipeline.run_paste_to_detail(1)
+
+    v1 = pipeline.get_verdict(job_v1["id"])
+    v2 = pipeline.get_verdict(job_v2["id"])
+    # 切换启用不改写历史证明：各自保留产出时的启用版本与计数
+    assert v1["启用版本"] == "v1"
+    assert (v1["输入行数"], v1["写入行数"], v1["拒收行数"]) == (6, 5, 1)
+    assert v2["启用版本"] == "v2-严格"
+    assert (v2["输入行数"], v2["写入行数"], v2["拒收行数"]) == (6, 3, 3)
+
+
+def test_verdict_absent_for_summary_job(fresh_db):
+    pipeline, _ = fresh_db
+    pipeline.run_paste_to_detail(1)
+    summary_job = pipeline.run_detail_to_summary(1)
+    assert pipeline.get_verdict(summary_job["id"]) is None
+
+
+def test_job_report_embeds_same_verdict(fresh_db):
+    pipeline, _ = fresh_db
+    job = pipeline.run_paste_to_detail(1)
+    report = pipeline.job_report(job["id"])
+    # 报告内嵌证明与只读接口同源
+    assert report["裁决证明"] == pipeline.get_verdict(job["id"])

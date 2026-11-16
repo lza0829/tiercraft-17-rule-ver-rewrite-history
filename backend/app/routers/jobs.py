@@ -23,6 +23,15 @@ def job_report(job_id: int):
     return report
 
 
+@router.get("/jobs/{job_id}/verdict")
+def job_verdict(job_id: int):
+    """规则裁决证明（只读）：启用版本、输入/写入/拒收计数与样本键。"""
+    verdict = pipeline.get_verdict(job_id)
+    if not verdict:
+        raise HTTPException(status_code=404, detail="该任务没有规则裁决证明")
+    return verdict
+
+
 @router.post("/jobs/paste-to-detail")
 def paste_to_detail(body: JobBody):
     try:
